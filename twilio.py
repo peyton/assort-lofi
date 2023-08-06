@@ -76,6 +76,7 @@ async def twilio_handler(twilio_ws):
                     if data['event'] == 'start':
                         start = data['start']
                         callsid = start['callSid']
+                        print(data)
                         callsid_queue.put_nowait(callsid)
                     if data['event'] == 'connected':
                         continue
