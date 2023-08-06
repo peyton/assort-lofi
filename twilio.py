@@ -27,6 +27,7 @@ def deepgram_connect():
 async def twilio_handler(twilio_ws):
     audio_queue = asyncio.Queue()
     callsid_queue = asyncio.Queue()
+    response_queue = asyncio.Queue()
 
     async with deepgram_connect() as deepgram_ws:
 
@@ -55,6 +56,19 @@ async def twilio_handler(twilio_ws):
 
             del subscribers[callsid]
 
+        async def twilio_sender(twilio_ws):
+            print('twilio_sender started')
+            while True:
+                chunk = await response_queue.get()
+                message = {
+                    'event': 'media',
+                    'streamSid': 'dummy',
+                    'media': {
+                        'payload': chunk
+                    }
+                }
+                await twilio_ws.send(json.dumps(message))
+
         async def twilio_receiver(twilio_ws):
             print('twilio_receiver started')
             # twilio sends audio data as 160 byte messages containing 20ms of audio each
@@ -65,22 +79,21 @@ async def twilio_handler(twilio_ws):
             #   A) not currently streaming (e.g. the outbound channel when the inbound channel starts ringing it)
             #   B) packets are dropped (this happens, and sometimes the timestamps which come back for subsequent packets are not aligned)
             inbuffer = bytearray(b'')
-            outbuffer = bytearray(b'')
             inbound_chunks_started = False
-            outbound_chunks_started = False
             latest_inbound_timestamp = 0
-            latest_outbound_timestamp = 0
             async for message in twilio_ws:
                 try:
                     data = json.loads(message)
                     if data['event'] == 'start':
                         start = data['start']
                         callsid = start['callSid']
-                        print(data)
+                        print(f'>>> CALL STARTING >>>\n{data}\n<<< CALL STARTING <<<')
                         callsid_queue.put_nowait(callsid)
                     if data['event'] == 'connected':
+                        print(f'>>> CALL CONNECTED >>>\n{data}\n<<< CALL CONNECTED <<<')
                         continue
                     if data['event'] == 'media':
+                        print(f'>>> CALL MEDIA >>>\n{data}\n<<< CALL MEDIA <<<')
                         media = data['media']
                         chunk = base64.b64decode(media['payload'])
                         if media['track'] == 'inbound':
@@ -95,38 +108,22 @@ async def twilio_handler(twilio_ws):
                                 # make it known that inbound chunks have started arriving
                                 inbound_chunks_started = True
                                 latest_inbound_timestamp = int(media['timestamp'])
-                                # this basically sets the starting point for outbound timestamps
-                                latest_outbound_timestamp = int(media['timestamp']) - 20
                             latest_inbound_timestamp = int(media['timestamp'])
                             # extend the inbound audio buffer with data
                             inbuffer.extend(chunk)
-                        if media['track'] == 'outbound':
-                            # make it known that outbound chunks have started arriving
-                            outbound_chunked_started = True
-                            # fills in silence if there have been dropped packets
-                            if latest_outbound_timestamp + 20 < int(media['timestamp']):
-                                bytes_to_fill = 8 * (int(media['timestamp']) - (latest_outbound_timestamp + 20))
-                                # NOTE: 0xff is silence for mulaw audio
-                                # and there are 8 bytes per ms of data for our format (8 bit, 8000 Hz)
-                                outbuffer.extend(b'\xff' * bytes_to_fill)
-                            latest_outbound_timestamp = int(media['timestamp'])
-                            # extend the outbound audio buffer with data
-                            outbuffer.extend(chunk)
                     if data['event'] == 'stop':
+                        print(f'>>> CALL STOPPING >>>\n{data}\n<<< CALL STOPPING <<<')
                         break
 
                     # check if our buffer is ready to send to our audio_queue (and, thus, then to deepgram)
-                    while len(inbuffer) >= BUFFER_SIZE and len(outbuffer) >= BUFFER_SIZE:
+                    while len(inbuffer) >= BUFFER_SIZE:
                         asinbound = AudioSegment(inbuffer[:BUFFER_SIZE], sample_width=1, frame_rate=8000, channels=1)
-                        asoutbound = AudioSegment(outbuffer[:BUFFER_SIZE], sample_width=1, frame_rate=8000, channels=1)
-                        mixed = AudioSegment.from_mono_audiosegments(asinbound, asoutbound)
 
                         # sending to deepgram via the audio_queue
-                        audio_queue.put_nowait(mixed.raw_data)
+                        audio_queue.put_nowait(asinbound.raw_data)
 
                         # clearing buffers
                         inbuffer = inbuffer[BUFFER_SIZE:]
-                        outbuffer = outbuffer[BUFFER_SIZE:]
                 except:
                     break
 
@@ -138,7 +135,8 @@ async def twilio_handler(twilio_ws):
         await asyncio.wait([
             asyncio.ensure_future(deepgram_sender(deepgram_ws)),
             asyncio.ensure_future(deepgram_receiver(deepgram_ws)),
-            asyncio.ensure_future(twilio_receiver(twilio_ws))
+            asyncio.ensure_future(twilio_receiver(twilio_ws)),
+            asyncio.ensure_future(twilio_sender(twilio_ws))
         ])
 
         await twilio_ws.close()
