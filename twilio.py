@@ -1,74 +1,16 @@
 import asyncio
 import base64
 import json
-import os
-import sys
-import websockets
-import ssl
-from dotenv import load_dotenv
 from pydub import AudioSegment
 
-load_dotenv()
+from deepgram import deepgram_connect, deepgram_sender, deepgram_receiver
 
-subscribers = {}
-
-def deepgram_connect():
-    deepgram_api_key = os.getenv('DEEPGRAM_API_KEY')
-    if not deepgram_api_key:
-        raise Exception("Set DEEPGRAM_API_KEY environment variable")
-
-    extra_headers = {
-        'Authorization': f'Token {deepgram_api_key}'
-    }
-    deepgram_ws = websockets.connect('wss://api.deepgram.com/v1/listen?encoding=mulaw&sample_rate=8000&channels=2&multichannel=true', extra_headers = extra_headers)
-
-    return deepgram_ws
-
-async def twilio_handler(twilio_ws):
+async def twilio_handler(twilio_ws, state):
     audio_queue = asyncio.Queue()
     callsid_queue = asyncio.Queue()
     response_queue = asyncio.Queue()
 
     async with deepgram_connect() as deepgram_ws:
-
-        async def deepgram_sender(deepgram_ws):
-            print('deepgram_sender started')
-            while True:
-                chunk = await audio_queue.get()
-                await deepgram_ws.send(chunk)
-
-        async def deepgram_receiver(deepgram_ws):
-            print('deepgram_receiver started')
-            # we will wait until the twilio ws connection figures out the callsid
-            # then we will initialize our subscribers list for this callsid
-            callsid = await callsid_queue.get()
-            subscribers[callsid] = []
-            # for each deepgram result received, forward it on to all
-            # queues subscribed to the twilio callsid
-            async for message in deepgram_ws:
-                for client in subscribers[callsid]:
-                    client.put_nowait(message)
-
-            # once the twilio call is over, tell all subscribed clients to close
-            # and remove the subscriber list for this callsid
-            for client in subscribers[callsid]:
-                client.put_nowait('close')
-
-            del subscribers[callsid]
-
-        async def twilio_sender(twilio_ws):
-            print('twilio_sender started')
-            while True:
-                chunk = await response_queue.get()
-                message = {
-                    'event': 'media',
-                    'streamSid': 'dummy',
-                    'media': {
-                        'payload': chunk
-                    }
-                }
-                await twilio_ws.send(json.dumps(message))
-
         async def twilio_receiver(twilio_ws):
             print('twilio_receiver started')
             # twilio sends audio data as 160 byte messages containing 20ms of audio each
@@ -93,7 +35,6 @@ async def twilio_handler(twilio_ws):
                         print(f'>>> CALL CONNECTED >>>\n{data}\n<<< CALL CONNECTED <<<')
                         continue
                     if data['event'] == 'media':
-                        print(f'>>> CALL MEDIA >>>\n{data}\n<<< CALL MEDIA <<<')
                         media = data['media']
                         chunk = base64.b64decode(media['payload'])
                         if media['track'] == 'inbound':
@@ -133,71 +74,9 @@ async def twilio_handler(twilio_ws):
             audio_queue.put_nowait(b'')
 
         await asyncio.wait([
-            asyncio.ensure_future(deepgram_sender(deepgram_ws)),
-            asyncio.ensure_future(deepgram_receiver(deepgram_ws)),
-            asyncio.ensure_future(twilio_receiver(twilio_ws)),
-            asyncio.ensure_future(twilio_sender(twilio_ws))
+            asyncio.ensure_future(deepgram_sender(deepgram_ws, audio_queue)),
+            asyncio.ensure_future(deepgram_receiver(deepgram_ws, state, callsid_queue)),
+            asyncio.ensure_future(twilio_receiver(twilio_ws))
         ])
 
         await twilio_ws.close()
-
-async def client_handler(client_ws):
-    client_queue = asyncio.Queue()
-
-    # first tell the client all active calls
-    await client_ws.send(json.dumps(list(subscribers.keys())))
-
-    # then recieve from the client which call they would like to subscribe to
-    # and add our client's queue to the subscriber list for that call
-    try:
-        # you may want to parse a proper json input here
-        # instead of grabbing the entire message as the callsid verbatim
-        callsid = await client_ws.recv()
-        callsid = callsid.strip()
-        if callsid in subscribers:
-            subscribers[callsid].append(client_queue)
-        else:
-            await client_ws.close()
-    except:
-        await client_ws.close()
-
-    async def client_sender(client_ws):
-        while True:
-            message = await client_queue.get()
-            if message == 'close':
-                break
-            try:
-                await client_ws.send(message)
-            except:
-                # if there was an error, remove this client queue
-                subscribers[callsid].remove(client_queue)
-                break
-
-    await asyncio.wait([
-        asyncio.ensure_future(client_sender(client_ws)),
-    ])
-
-    await client_ws.close()
-
-async def router(websocket, path):
-    if path == '/client':
-        print('client connection incoming')
-        await client_handler(websocket)
-    elif path == '/twilio':
-        print('twilio connection incoming')
-        await twilio_handler(websocket)
-
-def main():
-    # use this if using ssl
-#	ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-#	ssl_context.load_cert_chain('cert.pem', 'key.pem')
-#	server = websockets.serve(router, '0.0.0.0', 443, ssl=ssl_context)
-
-    # use this if not using ssl
-    server = websockets.serve(router, 'localhost', 5000)
-
-    asyncio.get_event_loop().run_until_complete(server)
-    asyncio.get_event_loop().run_forever()
-
-if __name__ == '__main__':
-    sys.exit(main() or 0)
