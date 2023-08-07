@@ -4,10 +4,14 @@ import json
 from pydub import AudioSegment
 
 from deepgram import deepgram_connect, deepgram_sender, deepgram_receiver
+from eleven import eleven_handler
 
 async def twilio_handler(twilio_ws, state):
-    audio_queue = asyncio.Queue()
     callsid_queue = asyncio.Queue()
+    inbound_audio_queue = asyncio.Queue()
+    outbound_audio_queue = asyncio.Queue()
+    streamsid_queue = asyncio.Queue()
+    transcript_queue = asyncio.Queue()
 
     async with deepgram_connect() as deepgram_ws:
         async def twilio_receiver(twilio_ws):
@@ -28,8 +32,10 @@ async def twilio_handler(twilio_ws, state):
                     if data['event'] == 'start':
                         start = data['start']
                         callsid = start['callSid']
+                        streamsid = start['streamSid']
                         print(f'>>> CALL STARTING >>>\n{data}\n<<< CALL STARTING <<<')
                         callsid_queue.put_nowait(callsid)
+                        streamsid_queue.put_nowait(streamsid)
                     if data['event'] == 'connected':
                         print(f'>>> CALL CONNECTED >>>\n{data}\n<<< CALL CONNECTED <<<')
                         continue
@@ -60,7 +66,7 @@ async def twilio_handler(twilio_ws, state):
                         asinbound = AudioSegment(inbuffer[:BUFFER_SIZE], sample_width=1, frame_rate=8000, channels=1)
 
                         # sending to deepgram via the audio_queue
-                        audio_queue.put_nowait(asinbound.raw_data)
+                        inbound_audio_queue.put_nowait(asinbound.raw_data)
 
                         # clearing buffers
                         inbuffer = inbuffer[BUFFER_SIZE:]
@@ -70,12 +76,30 @@ async def twilio_handler(twilio_ws, state):
             # the async for loop will end if the ws connection from twilio dies
             # and if this happens, we should forward an empty byte to deepgram
             # to signal deepgram to send back remaining messages before closing
-            audio_queue.put_nowait(b'')
+            inbound_audio_queue.put_nowait(b'')
+
+        async def twilio_sender(twilio_ws):
+            print('twilio_sender started')
+            streamsid = await streamsid_queue.get()
+            while True:
+                chunk = await outbound_audio_queue.get()
+                message = {
+                    'event': 'media',
+                    'streamSid': streamsid,
+                    'media': {
+                        'payload': base64.b64encode(chunk).decode()
+                    }
+                }
+                await twilio_ws.send(json.dumps(message))
+
+
 
         await asyncio.wait([
-            asyncio.ensure_future(deepgram_sender(deepgram_ws, audio_queue)),
-            asyncio.ensure_future(deepgram_receiver(deepgram_ws, state, callsid_queue)),
-            asyncio.ensure_future(twilio_receiver(twilio_ws))
+            asyncio.ensure_future(deepgram_sender(deepgram_ws, inbound_audio_queue)),
+            asyncio.ensure_future(deepgram_receiver(deepgram_ws, state, callsid_queue, transcript_queue)),
+            asyncio.ensure_future(twilio_sender(twilio_ws)),
+            asyncio.ensure_future(twilio_receiver(twilio_ws)),
+            asyncio.ensure_future(eleven_handler(transcript_queue, outbound_audio_queue))
         ])
 
         await twilio_ws.close()
