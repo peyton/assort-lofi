@@ -10,3 +10,10 @@ DEEPGRAM = SimpleNamespace(
         'tier': 'nova'
     }
 )
+
+ELEVEN = SimpleNamespace(
+    **{
+        'model': 'eleven_monolingual_v1',
+        'voice': 'Bella'
+    }
+)

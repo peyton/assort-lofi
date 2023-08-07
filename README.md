@@ -15,10 +15,10 @@ python app.py
 ## Polish
 
 #### Overall
+- de-spaghettify into interruptible streaming pipeline
 - optimize latency
 - instrumentation & logging
 - state management
-- de-spaghettify and pipeline processing
 - failure handling
 
 #### Deepgram
