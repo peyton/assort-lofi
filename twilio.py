@@ -8,7 +8,6 @@ from deepgram import deepgram_connect, deepgram_sender, deepgram_receiver
 async def twilio_handler(twilio_ws, state):
     audio_queue = asyncio.Queue()
     callsid_queue = asyncio.Queue()
-    response_queue = asyncio.Queue()
 
     async with deepgram_connect() as deepgram_ws:
         async def twilio_receiver(twilio_ws):

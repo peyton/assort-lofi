@@ -15,10 +15,8 @@ def deepgram_connect():
     extra_headers = {
         'Authorization': f'Token {deepgram_api_key}'
     }
-    # deepgram_ws = websockets.connect(f'{DEEPGRAM.listen_endpoint}?encoding=mulaw&sample_rate=8000&punctuate={DEEPGRAM.punctuate}&numerals={DEEPGRAM.numerals}', extra_headers = extra_headers)
-    deepgram_ws = websockets.connect(f'{DEEPGRAM.listen_endpoint}?encoding=mulaw&sample_rate=8000', extra_headers = extra_headers)
-
-
+    deepgram_ws = websockets.connect(f'{DEEPGRAM.listen_endpoint}?encoding=mulaw&sample_rate=8000&punctuate={DEEPGRAM.punctuate}&numerals={DEEPGRAM.numerals}', extra_headers = extra_headers)
+    # deepgram_ws = websockets.connect(f'{DEEPGRAM.listen_endpoint}?encoding=mulaw&sample_rate=8000&channels=2&multichannel=true', extra_headers = extra_headers)
     return deepgram_ws
 
 async def deepgram_receiver(deepgram_ws, state, callsid_queue):
@@ -31,7 +29,6 @@ async def deepgram_receiver(deepgram_ws, state, callsid_queue):
     # queues subscribed to the twilio callsid
     async for message in deepgram_ws:
         data = json.loads(message)
-        print(message)
         if not data['is_final'] or not data['speech_final']:
             continue
         alternatives = data['channel']['alternatives']
@@ -39,7 +36,12 @@ async def deepgram_receiver(deepgram_ws, state, callsid_queue):
             continue
         if not len(alternatives):
             continue
-        transcript = alternatives[0]['transcript]']
+        alternative = alternatives[0]
+        transcript = alternative['transcript']
+        if not transcript:
+            continue
+        if alternative['confidence'] < DEEPGRAM.confidence_threshold:
+            transcript = 'please repeat the question'
         for client in state.subscribers[callsid]:
             client.put_nowait(transcript)
 
