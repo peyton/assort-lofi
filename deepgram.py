@@ -15,7 +15,7 @@ def deepgram_connect():
     extra_headers = {
         'Authorization': f'Token {deepgram_api_key}'
     }
-    deepgram_ws = websockets.connect(f'{DEEPGRAM.listen_endpoint}?encoding=mulaw&sample_rate=8000&punctuate={DEEPGRAM.punctuate}&numerals={DEEPGRAM.numerals}', extra_headers = extra_headers)
+    deepgram_ws = websockets.connect(f'{DEEPGRAM.listen_endpoint}?encoding=mulaw&sample_rate=8000&smart_format={DEEPGRAM.smart_format}&endpointing={DEEPGRAM.endpointing}&model={DEEPGRAM.model}&tier={DEEPGRAM.tier}', extra_headers = extra_headers)
     # deepgram_ws = websockets.connect(f'{DEEPGRAM.listen_endpoint}?encoding=mulaw&sample_rate=8000&channels=2&multichannel=true', extra_headers = extra_headers)
     return deepgram_ws
 

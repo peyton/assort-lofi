@@ -2,9 +2,11 @@ from types import SimpleNamespace
 
 DEEPGRAM = SimpleNamespace(
     **{
-        'confidence_threshold': 0.6,
+        'confidence_threshold': 0.5,
+        'endpointing': '500',
         'listen_endpoint': 'wss://api.deepgram.com/v1/listen',
-        'numerals': 'false',
-        'punctuate': 'false',
+        'model': 'phonecall',
+        'smart_format': 'true',
+        'tier': 'nova'
     }
 )
