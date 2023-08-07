@@ -1,24 +1,31 @@
 # Assort LoFi Demo
 
-### Running
+## Running
 
-Populate `.env` using keys from `.env.example`, then run:
+1. Populate `.env` using keys from `.env.example`.
+
+2. Create a Twilio TwiML bin from the contents of `twimlbin.xml`.
+
+3. Run:
 
 ```sh
 python app.py
 ```
 
-### Polish
+## Polish
 
-Overall:
+#### Overall
+- optimize latency
 - instrumentation & logging
 - state management
+- de-spaghettify and pipeline processing
 - failure handling
 
-Deepgram:
+#### Deepgram
 - send keepalive and closestream
 - employ keywords (provider name, pt name, etc)
+- store transcript & audio
 
-Testing:
+#### Testing
 - unit tests
 - regression/perf tests
