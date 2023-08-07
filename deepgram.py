@@ -19,7 +19,7 @@ def deepgram_connect():
     # deepgram_ws = websockets.connect(f'{DEEPGRAM.listen_endpoint}?encoding=mulaw&sample_rate=8000&channels=2&multichannel=true', extra_headers = extra_headers)
     return deepgram_ws
 
-async def deepgram_receiver(deepgram_ws, state, callsid_queue):
+async def deepgram_receiver(deepgram_ws, state, callsid_queue, transcript_queue):
     print('deepgram_receiver started')
     # we will wait until the twilio ws connection figures out the callsid
     # then we will initialize our subscribers list for this callsid
@@ -31,17 +31,16 @@ async def deepgram_receiver(deepgram_ws, state, callsid_queue):
         data = json.loads(message)
         if not data['is_final'] or not data['speech_final']:
             continue
-        alternatives = data['channel']['alternatives']
-        if not alternatives:
-            continue
-        if not len(alternatives):
+        alternatives = data.get('channel').get('alternatives')
+        if not alternatives or not len(alternatives):
             continue
         alternative = alternatives[0]
-        transcript = alternative['transcript']
+        transcript = alternative.get('transcript')
         if not transcript:
             continue
-        if alternative['confidence'] < DEEPGRAM.confidence_threshold:
-            transcript = 'please repeat the question'
+        if alternative.get('confidence') < DEEPGRAM.confidence_threshold:
+            transcript = DEEPGRAM.confidence_threshold_exceeded_message
+        transcript_queue.put_nowait(transcript)
         for client in state.subscribers[callsid]:
             client.put_nowait(transcript)
 

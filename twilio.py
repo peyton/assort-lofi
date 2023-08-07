@@ -79,27 +79,35 @@ async def twilio_handler(twilio_ws, state):
             inbound_audio_queue.put_nowait(b'')
 
         async def twilio_sender(twilio_ws):
+            print('twilio_sender started')
             streamsid = await streamsid_queue.get()
-
             while True:
                 chunk = await outbound_audio_queue.get()
                 message = {
                     'event': 'media',
                     'streamSid': streamsid,
                     'media': {
-                        'payload': base64.b64encode(chunk)
+                        'payload': base64.b64encode(chunk).decode()
                     }
                 }
-                twilio_ws.send(json.dumps(message))
+                await twilio_ws.send(json.dumps(message))
+                mark_message = {
+                    'event': 'mark',
+                    'streamSid': streamsid,
+                    'mark': {
+                        'name': 'response'
+                    }
+                }
+                await twilio_ws.send(json.dumps(mark_message))
 
 
 
         await asyncio.wait([
             asyncio.ensure_future(deepgram_sender(deepgram_ws, inbound_audio_queue)),
-            asyncio.ensure_future(deepgram_receiver(deepgram_ws, state, callsid_queue)),
-            asyncio.ensure_future(twilio_receiver(twilio_ws)),
+            asyncio.ensure_future(deepgram_receiver(deepgram_ws, state, callsid_queue, transcript_queue)),
             asyncio.ensure_future(twilio_sender(twilio_ws)),
-            asyncio.ensure_future(eleven_handler(state, transcript_queue, outbound_audio_queue))
+            asyncio.ensure_future(twilio_receiver(twilio_ws)),
+            asyncio.ensure_future(eleven_handler(transcript_queue, outbound_audio_queue))
         ])
 
         await twilio_ws.close()
