@@ -91,14 +91,6 @@ async def twilio_handler(twilio_ws, state):
                     }
                 }
                 await twilio_ws.send(json.dumps(message))
-                mark_message = {
-                    'event': 'mark',
-                    'streamSid': streamsid,
-                    'mark': {
-                        'name': 'response'
-                    }
-                }
-                await twilio_ws.send(json.dumps(mark_message))
 
 
 
